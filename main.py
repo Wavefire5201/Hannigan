@@ -67,7 +67,7 @@ async def check_message(message):
     scores = {}
     for k, v in response.items():
         scores[k] = v["summaryScore"]["value"]
-    print(f"{message.content}: {scores}")
+    # print(f"{message.content}: {scores}")
 
     user_score = guild_data[str(message.guild.id)][str(message.author.id)]["score"]
     for k, v in scores.items():
