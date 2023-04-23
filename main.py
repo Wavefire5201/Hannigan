@@ -165,7 +165,7 @@ async def bard(ctx, message: str):
 
 @bot.slash_command(
     name="setup",
-    description="Setup a channel for the active chatbot. Make sure to run this command in the desired channel to be setup.",
+    description="Setup a channel for the active chatbot.",
 )
 async def setup(ctx):
     if "chat_channel" not in guild_data[str(ctx.guild.id)]:
@@ -179,7 +179,7 @@ async def setup(ctx):
 
 @bot.slash_command(
     name="edit_setup",
-    description="Change the chatbot channel. Make sure to run this command in the desired channel to be setup.",
+    description="Change the chatbot channel.",
 )
 async def edit_setup(ctx):
     guild_data[str(ctx.guild.id)]["chat_channel"] = ctx.channel.id
