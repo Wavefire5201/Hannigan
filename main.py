@@ -32,13 +32,16 @@ client = discovery.build(
 )
 
 attributeThresholds = {
-    "INSULT": 0.75,
-    "TOXICITY": 0.75,
-    "SPAM": 0.75,
-    "FLIRTATION": 0.75,
+    "INSULT": 0.6,
+    "TOXICITY": 0.6,
 }
 
-requestedAttributes = ["TOXICITY", "INSULT", "SPAM", "FLIRTATION"]
+attributeThresholdsExtreme = {
+    "INSULT": 0.8,
+    "TOXICITY": 0.8,
+}
+
+requestedAttributes = ["TOXICITY", "INSULT"]
 # Functions
 
 
@@ -51,10 +54,25 @@ async def check_message(message):
     if message.attachments or message.author.bot:
         return
 
-    if not any(str(message.author.id) in d for d in guild_data[str(message.guild.id)]):
-        guild_data[str(message.guild.id)][str(message.author.id)] = {}
-        guild_data[str(message.guild.id)][str(message.author.id)]["score"] = 100
+    if not any(
+        str(message.author.id) in d for d in guild_data[str(message.guild.id)]["users"]
+    ):
+        guild_data[str(message.guild.id)]["users"][str(message.author.id)] = {}
+        guild_data[str(message.guild.id)]["users"][str(message.author.id)][
+            "score"
+        ] = 100
         await dump_data()
+
+    if (
+        guild_data[str(message.guild.id)]["users"][str(message.author.id)]["score"] % 10
+        == 0
+        and guild_data[str(message.guild.id)]["users"][str(message.author.id)]["score"]
+        != 100
+    ):
+        # await bot.get_user(message.author.id).timeout()
+        await message.channel.send(
+            f"{bot.get_user(message.author.id)} has been timeouted for being vile."
+        )
 
     body = {
         "comment": {"text": message.content},
@@ -67,14 +85,24 @@ async def check_message(message):
     scores = {}
     for k, v in response.items():
         scores[k] = v["summaryScore"]["value"]
-    # print(f"{message.content}: {scores}")
+    print(f"{message.content}: {scores}")
 
-    user_score = guild_data[str(message.guild.id)][str(message.author.id)]["score"]
+    user_score = guild_data[str(message.guild.id)]["users"][str(message.author.id)][
+        "score"
+    ]
+    # guild_data[str(ctx.guild.id)]["users"][str(ctx.author.id)]["score"]
     for k, v in scores.items():
-        if v >= attributeThresholds[k]:
-            guild_data[str(message.guild.id)][str(message.author.id)]["score"] = (
-                user_score - 1
-            )
+        if v >= attributeThresholdsExtreme[k]:
+            guild_data[str(message.guild.id)]["users"][str(message.author.id)][
+                "score"
+            ] = (user_score - 2)
+            await message.delete()
+            await message.channel.send("That's a bit too far.")
+            await dump_data()
+        elif v >= attributeThresholds[k]:
+            guild_data[str(message.guild.id)]["users"][str(message.author.id)][
+                "score"
+            ] = (user_score - 1)
             await dump_data()
     # await message.reply(f"{scores}")
 
@@ -114,6 +142,7 @@ async def on_ready():
         if not any(str(guild.id) in d for d in guild_data):
             # print(guild.id)
             guild_data[str(guild.id)] = {}
+            guild_data[str(guild.id)]["users"] = {}
             with open("data/guild_data.json", "w") as f:
                 json.dump(guild_data, f)
     print(f"Logged in as {bot.user}!")
@@ -137,6 +166,13 @@ async def on_slash_command_error(ctx, error):
 
 @bot.event
 async def on_guild_join(guild):
+    for guild in bot.guilds:
+        if not any(str(guild.id) in d for d in guild_data):
+            # print(guild.id)
+            guild_data[str(guild.id)] = {}
+            guild_data[str(guild.id)]["users"] = {}
+            with open("data/guild_data.json", "w") as f:
+                json.dump(guild_data, f)
     guild_data[str(guild.id)] = {}
     channel_list = guild.text_channels
     embed = discord.Embed(
@@ -189,15 +225,44 @@ async def edit_setup(ctx):
 
 @bot.slash_command(name="check_score", description="Check your social score.")
 async def check_score(ctx):
-    await ctx.respond(
-        f"Your score is {guild_data[str(ctx.guild.id)][str(ctx.author.id)]['score']}"
-    )
+    score = guild_data[str(ctx.guild.id)]["users"][str(ctx.author.id)]["score"]
+    await ctx.respond(f"Your score is {score}")
 
 
 @bot.slash_command(name="help", description="Get help with the bot.")
 async def help(ctx):
     await ctx.respond(
         "If you need to setup the chatbot, run `/setup` in the desired channel. If you need to change the chatbot channel, run `/edit_setup` in the desired channel. If you need to check your social score, run `/check_score`. More information coming soon..."
+    )
+
+
+@bot.slash_command(name="leaderboard", description="Get the leaderboard.")
+async def leaderboard(ctx):
+    data = guild_data[str(ctx.guild.id)]["users"]
+    sorted_data = sorted(data.items(), key=lambda x: x[1]["score"], reverse=True)
+    embed = discord.Embed(
+        title="Leaderboard",
+        description="The top 10 users with the highest social credit.",
+        timestamp=discord.utils.utcnow(),
+    )
+    for i in range(10 if len(sorted_data) > 10 else len(sorted_data)):
+        if i < len(sorted_data):
+            embed.add_field(
+                name=f"{i+1}. {bot.get_user(int(sorted_data[i][0]))}",
+                value=f"Score: {sorted_data[i][1]['score']}",
+            )
+    await ctx.respond(embed=embed)
+
+
+@bot.slash_command(name="ping", description="Get the bot's ping.")
+async def ping(ctx):
+    await ctx.respond(f"Pong! {round(bot.latency * 1000)}ms")
+
+
+@bot.slash_command(name="invite", description="Get the bot's invite link.")
+async def invite(ctx):
+    await ctx.respond(
+        "https://discord.com/oauth2/authorize?client_id=1099363267731804202&scope=bot&permissions=8"
     )
 
 
