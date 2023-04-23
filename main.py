@@ -1,6 +1,6 @@
 import discord
 import dotenv
-import json, os
+import json, os, datetime
 import pandas as pd
 from googleapiclient import discovery
 from discord.ext import commands
@@ -50,6 +50,26 @@ async def dump_data():
         json.dump(guild_data, f)
 
 
+"""
+@bot.slash_command()
+async def timeout(
+    ctx: discord.ApplicationContext, member: discord.Member, minutes: int
+):
+    Apply a timeout to a member.
+
+    duration = datetime.timedelta(minutes=minutes)
+    await member.timeout_for(duration)
+    await ctx.respond(f"Member timed out for {minutes} minutes.")
+
+    
+    The method used above is a shortcut for:
+
+    until = discord.utils.utcnow() + datetime.timedelta(minutes=minutes)
+    await member.timeout(until)
+    
+"""
+
+
 async def check_message(message):
     if message.attachments or message.author.bot:
         return
@@ -62,14 +82,12 @@ async def check_message(message):
             "score"
         ] = 100
         await dump_data()
-
-    if (
-        guild_data[str(message.guild.id)]["users"][str(message.author.id)]["score"] % 10
-        == 0
-        and guild_data[str(message.guild.id)]["users"][str(message.author.id)]["score"]
-        != 100
-    ):
-        # await bot.get_user(message.author.id).timeout()
+    score = guild_data[str(message.guild.id)]["users"][str(message.author.id)]["score"]
+    print(score)
+    if score % 10 == 0 and score != 100:
+        await message.author.guild.get_member(message.author.id).timeout_for(
+            datetime.timedelta(minutes=(10 - (score / 10)) * 2)
+        )
         await message.channel.send(
             f"{bot.get_user(message.author.id)} has been timeouted for being vile."
         )
