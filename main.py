@@ -6,7 +6,13 @@ from googleapiclient import discovery
 from discord.ext import commands
 from Bard import Chatbot
 
+dotenv.load_dotenv()
 # Initialize bots & data
+print(os.getenv("BARD_TOKEN"))
+guild_df = pd.DataFrame(
+    pd.read_json("data/guild_data.json", convert_dates=False, precise_float=True)
+)
+print(guild_df)
 
 if (
     not os.path.exists("data/guild_data.json")
@@ -18,15 +24,15 @@ if (
 with open("data/guild_data.json", "r") as f:
     guild_data = json.load(f)
 
-
-dotenv.load_dotenv()
 bot = discord.Bot(intents=discord.Intents.all())
 bard_bot = Chatbot(os.getenv("BARD_TOKEN"))
+PERSPECTIVE_KEY = os.getenv("PERSPECTIVE_KEY")
+
 
 client = discovery.build(
     "commentanalyzer",
     "v1alpha1",
-    developerKey=os.getenv("PERSPECTIVE_KEY"),
+    developerKey=PERSPECTIVE_KEY,
     discoveryServiceUrl="https://commentanalyzer.googleapis.com/$discovery/rest?version=v1alpha1",
     static_discovery=False,
 )
@@ -48,6 +54,13 @@ requestedAttributes = ["TOXICITY", "INSULT"]
 async def dump_data():
     with open("data/guild_data.json", "w") as f:
         json.dump(guild_data, f)
+
+
+async def check_msg_len(message, content):
+    if len(content) > 2000:
+        for i in range(0, len(content), 2000):
+            await message.channel.send(content[i : i + 2000])
+    await message.edit(content=content)
 
 
 """
@@ -73,7 +86,9 @@ async def timeout(
 async def check_message(message):
     if message.attachments or message.author.bot:
         return
-
+    if "<@" in message.content or "<#" in message.content or "<:" in message.content:
+        return
+    # Create user if user doesn't exist
     if not any(
         str(message.author.id) in d for d in guild_data[str(message.guild.id)]["users"]
     ):
@@ -82,16 +97,18 @@ async def check_message(message):
             "score"
         ] = 100
         await dump_data()
+        print(f"LOG | Added {message.author} to {message.guild.name}")
     score = guild_data[str(message.guild.id)]["users"][str(message.author.id)]["score"]
-    print(score)
+    # Timeout
     if score % 10 == 0 and score != 100:
         await message.author.guild.get_member(message.author.id).timeout_for(
             datetime.timedelta(minutes=(10 - (score / 10)) * 2)
         )
+        guild_data[str(message.guild.id)]["users"][str(message.author.id)]["score"] = score - 1
         await message.channel.send(
             f"{bot.get_user(message.author.id)} has been timeouted for being vile."
         )
-
+    # Perspective API
     body = {
         "comment": {"text": message.content},
         "requestedAttributes": {key: {} for key in requestedAttributes},
@@ -99,30 +116,29 @@ async def check_message(message):
     }
 
     response = client.comments().analyze(body=body).execute()["attributeScores"]
-    # print(response)
+
     scores = {}
     for k, v in response.items():
         scores[k] = v["summaryScore"]["value"]
-    print(f"{message.content}: {scores}")
+    print(f"Message sent by {message.author}: {message.content}: {scores}")
 
+    # Social credit
     user_score = guild_data[str(message.guild.id)]["users"][str(message.author.id)][
         "score"
     ]
-    # guild_data[str(ctx.guild.id)]["users"][str(ctx.author.id)]["score"]
     for k, v in scores.items():
         if v >= attributeThresholdsExtreme[k]:
             guild_data[str(message.guild.id)]["users"][str(message.author.id)][
                 "score"
             ] = (user_score - 2)
             await message.delete()
-            await message.channel.send("That's a bit too far.")
+            await message.channel.send("That's a bit too far.", delete_after=3)
             await dump_data()
         elif v >= attributeThresholds[k]:
             guild_data[str(message.guild.id)]["users"][str(message.author.id)][
                 "score"
             ] = (user_score - 1)
             await dump_data()
-    # await message.reply(f"{scores}")
 
 
 async def chat_bot(message):
@@ -131,7 +147,8 @@ async def chat_bot(message):
     if message.channel.id == guild_data[str(message.guild.id)]["chat_channel"]:
         msg = await message.channel.send("Hannigan is thinking...")
         bard_response = bard_bot.ask(message.content)
-        await msg.edit(content=bard_response["content"])
+        await check_msg_len(message=msg, content=bard_response["content"])
+        # await msg.edit(content=bard_response["content"])
 
 
 # Buttons
@@ -168,6 +185,11 @@ async def on_ready():
 
 @bot.event
 async def on_message(message):
+    # print(type(message.content))
+    # if message.author.id == 336417837805469696:
+    #     print(f"Deleted {message.content}")
+    #     await message.delete()
+
     await check_message(message)
     await chat_bot(message)
 
@@ -279,9 +301,23 @@ async def ping(ctx):
 
 @bot.slash_command(name="invite", description="Get the bot's invite link.")
 async def invite(ctx):
-    await ctx.respond(
-        "https://discord.com/oauth2/authorize?client_id=1099363267731804202&scope=bot&permissions=8"
+    embed = discord.Embed(
+        title="Invite Link",
+        url="https://discord.com/oauth2/authorize?client_id=1099363267731804202&scope=bot&permissions=8",
+        description="Invite Hannigan to another server!",
     )
+    embed.set_timestamp(discord.utils.utcnow())
+    await ctx.respond(embed=embed)
+
+
+@bot.slash_command(name="reset_score", description="Secret command")
+async def reset_score(ctx, user: discord.User):
+    if ctx.author.id != 416400712625553408:
+        await ctx.respond("You can't use this command!", ephemeral=True)
+        return
+    guild_data[str(ctx.guild.id)]["users"][str(user.id)]["score"] = 100
+    await dump_data()
+    await ctx.respond(f"{user.name}'s score has been reset.", ephemeral=True)
 
 
 # Run bot
